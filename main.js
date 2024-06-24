@@ -8,23 +8,24 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js'
 let scene, camera, renderer;
 let world, cannonDebugger;
 let timeStep = 1/60; // update rate for the world
-let controls; // orbit control (very important)
 let groundMaterial;
 
 let carBody, carMesh; // car without wheels
 let vehicle; // full body of the car
 let wheelBody1, wheelBody2, wheelBody3, wheelBody4;
 let wheelMesh1, wheelMesh2, wheelMesh3, wheelMesh4;
-
 let maxSteerVal = Math.PI / 8; // steer of the car
-let maxForce = 25; // max force on the car
+let maxForce = 100; // max force on the car
+
+let chaseCam, chaseCamPilot; // 2 POVs of the camera
+let view = new THREE.Vector3(); // world position of the camera
 
 const textureLoader = new THREE.TextureLoader(); // texture loader
 
 // Setup
 initScene();
 initWorld();
-initOrbitControls();
+initChaseCam();
 createGround(); // create the "earth"
 createCar();
 createRamp();
@@ -48,14 +49,49 @@ function initScene(){
 
     // Camera
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
-    camera.position.set(0,10,-15);
 
     // Renderer
     renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
+
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
     document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    const light = new THREE.DirectionalLight();
+    light.position.set(25, 120, 25);
+    scene.add(light);
+
+    light.castShadow = true;
+
+    let d = 600;
+    light.shadow.mapSize.width = 2048;
+    light.shadow.mapSize.height = 2048;
+    light.shadow.camera.near = 0.5;
+    light.shadow.camera.far = d;
+    light.shadow.camera.top = d;
+    light.shadow.camera.bottom = -d;
+    light.shadow.camera.left = -d;
+    light.shadow.camera.right = -d;
 }
+
+function initChaseCam(){
+    chaseCam = new THREE.Object3D();
+    chaseCam.position.set(0,0,0);
+    chaseCam.rotation.set(0, -Math.PI / 2, 0);
+
+    chaseCamPilot = new THREE.Object3D();
+    chaseCamPilot.position.set(0, 8, -20);
+
+    chaseCam.add(chaseCamPilot); // child 
+
+    scene.add(chaseCam);
+}
+
+
 
 // Cannon.js world
 function initWorld(){
@@ -69,14 +105,6 @@ function initWorld(){
 
 }
 
-
-function initOrbitControls(){
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxDistance = 1000;
-    
-}
 
 function createGround(){
     groundMaterial = new CANNON.Material("groundMaterial");
@@ -93,26 +121,29 @@ function createGround(){
     world.addBody(groundBody);
 
     // texture 
-    const groundTexture = textureLoader.load("src/texture.jpg");
+    const groundTexture = textureLoader.load("./textures/texture.jpg");
     groundTexture.wrapS = THREE.RepeatWrapping;
     groundTexture.wrapT = THREE.RepeatWrapping;
-    groundTexture.repeat.set(48, 48);
+    groundTexture.repeat.set(24, 24);
 
     const groundMat = new THREE.MeshStandardMaterial({
-        map: groundTexture
+        map: groundTexture,
+        color: 0x38761d // dark green
     });
     const groundGeo = new THREE.BoxGeometry(1000, 2, 1000);
 
     const groundMesh = new THREE.Mesh(groundGeo, groundMat);
     scene.add(groundMesh);
     groundMesh.position.set(0, -1, 0);
+
+    groundMesh.receiveShadow = true;
 }
 
 function createCar(){
     const carMaterial = new CANNON.Material("carMaterial");
 
     const slipperyGround = new CANNON.ContactMaterial(groundMaterial, carMaterial, {
-        friction: 0.5,
+        friction: 0.9,
         restitution: 0.5,
         contactEquationStiffness: 1e9, //sponginess
         contactEquationRelaxation: 3,
@@ -125,11 +156,15 @@ function createCar(){
     // Shape and 
     const carShape = new CANNON.Box(new CANNON.Vec3(4, 0.5, 2));
     carBody = new CANNON.Body({
-        mass: 5,
+        mass: 10,
         material: carMaterial,
         shape: carShape,
-        position: new CANNON.Vec3(0,6,0)
+        position: new CANNON.Vec3(0,6,0),
     });
+
+    carBody.angularDamping = 0.9; // reduce flipping (NEEDED!)
+
+    carBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), Math.PI / 2);
 
     vehicle = new CANNON.RigidVehicle({
         chassisBody: carBody
@@ -139,7 +174,25 @@ function createCar(){
 
     vehicle.addToWorld(world);
 
+    const Gloader = new GLTFLoader();
+    Gloader.load("./models/scene.gltf", function(gltf){
+        carMesh = gltf.scene;
+        carMesh.scale.set(1, 1, 1);
+        carMesh.position.copy(carBody.position);
+        carMesh.quaternion.copy(carBody.quaternion);
+    
+
+        carMesh.add(chaseCam);
+        scene.add(carMesh);
+
+        carMesh.traverse(function(node) {
+            if(node.isMesh) {node.castShadow = true;}
+        });
+    });
+
     createMeshes();
+
+    
 }
 
 function addWheels(){
@@ -155,7 +208,7 @@ function addWheels(){
         mass, material: wheelMaterial 
     });
     wheelBody1.addShape(wheelShape);
-    wheelBody1.angularDamping = 0.4;
+    wheelBody1.angularDamping = 0.99;
     vehicle.addWheel({
       body: wheelBody1,
       position: new CANNON.Vec3(-2, 0, axisWidth / 2),
@@ -168,7 +221,7 @@ function addWheels(){
         mass, material: wheelMaterial 
     });
     wheelBody2.addShape(wheelShape);
-    wheelBody2.angularDamping = 0.4;
+    wheelBody2.angularDamping = 0.99;
     vehicle.addWheel({
       body: wheelBody2,
       position: new CANNON.Vec3(-2, 0, -axisWidth / 2),
@@ -181,7 +234,7 @@ function addWheels(){
         mass, material: wheelMaterial 
     });
     wheelBody3.addShape(wheelShape);
-    wheelBody3.angularDamping = 0.4;
+    wheelBody3.angularDamping = 0.99;
     vehicle.addWheel({
       body: wheelBody3,
       position: new CANNON.Vec3(2, 0, axisWidth / 2),
@@ -194,7 +247,7 @@ function addWheels(){
         mass, material: wheelMaterial 
     });
     wheelBody4.addShape(wheelShape);
-    wheelBody4.angularDamping = 0.4;
+    wheelBody4.angularDamping = 0.99;
     vehicle.addWheel({
       body: wheelBody4,
       position: new CANNON.Vec3(2, 0, -axisWidth / 2),
@@ -216,6 +269,17 @@ function createRamp(){
     rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI/12);
 
     world.addBody(rampBody);
+
+    // Ramp Mesh
+    const rampMat = new THREE.MeshStandardMaterial({color: 0xd3c3a2});
+    const rampGeo = new THREE.BoxGeometry(10, 2, 20);
+
+    const rampMesh = new THREE.Mesh(rampGeo, rampMat);
+    scene.add(rampMesh);
+    rampMesh.position.copy(rampBody.position);
+    rampMesh.quaternion.copy(rampBody.quaternion);
+
+    rampMesh.receiveShadow = true;
 }
 
 
@@ -272,26 +336,29 @@ document.addEventListener('keyup', (event) => {
 
 // Create the meshes for the vehicle
 function createMeshes(){
-    carMesh = new THREE.Mesh(new THREE.BoxGeometry(8,1,4), new THREE.MeshNormalMaterial());
-    scene.add(carMesh);
+    const wheelGeo = new THREE.SphereGeometry(1);
+    const wheelMat = new THREE.MeshNormalMaterial();
 
-    wheelMesh1 = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshNormalMaterial());
+    wheelMesh1 = new THREE.Mesh(wheelGeo, wheelMat);
     scene.add(wheelMesh1);
 
-    wheelMesh2 = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshNormalMaterial());
+    wheelMesh2 = new THREE.Mesh(wheelGeo, wheelMat);
     scene.add(wheelMesh2);
 
-    wheelMesh3 = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshNormalMaterial());
+    wheelMesh3 = new THREE.Mesh(wheelGeo, wheelMat);
     scene.add(wheelMesh3);
 
-    wheelMesh4 = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshNormalMaterial());
+    wheelMesh4 = new THREE.Mesh(wheelGeo, wheelMat);
     scene.add(wheelMesh4);
 }
 
 // Update sync between mesh and body
 function updateCar(){
-    carMesh.position.copy(carBody.position);
-    carMesh.quaternion.copy(carBody.quaternion);
+    if(carMesh){
+        carMesh.position.copy(carBody.position);
+        carMesh.quaternion.copy(carBody.quaternion);
+        camera.lookAt(carMesh.position);
+    }
 
     wheelMesh1.position.copy(wheelBody1.position);
     wheelMesh1.quaternion.copy(wheelBody1.quaternion);
@@ -304,19 +371,28 @@ function updateCar(){
 
     wheelMesh4.position.copy(wheelBody4.position);
     wheelMesh4.quaternion.copy(wheelBody4.quaternion);
+
 }
 
 
 function animate(){
-    controls.update();
-    cannonDebugger.update();
+    //cannonDebugger.update();
+    
     world.step(timeStep);
 
     updateCar();
+    updateChaseCam();
 
     renderer.render(scene, camera);
     
     requestAnimationFrame(animate);
+}
+
+function updateChaseCam(){
+    chaseCamPilot.getWorldPosition(view);
+    if (view.y < 1) view.y = 1; // y always positive to avoid camera flip
+
+    camera.position.lerpVectors(camera.position, view, 0.3); // gap between camera and car
 }
 
 

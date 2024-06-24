@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js Box with Texture</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    // Set up the scene, camera, and renderer
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Create a box geometry
+    const geometry = new THREE.BoxGeometry();
+
+    // Load the texture
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load('textures/texture.jpg', function (texture) {
+        // Create a material and apply the texture
+        const material = new THREE.MeshBasicMaterial({ map: texture });
+
+        // Create a mesh with the geometry and material
+        const cube = new THREE.Mesh(geometry, material);
+
+        // Add the mesh to the scene
+        scene.add(cube);
+
+        // Position the camera
+        camera.position.z = 5;
+
+        // Render the scene
+        function animate() {
+            requestAnimationFrame(animate);
+            cube.rotation.x += 0.01;
+            cube.rotation.y += 0.01;
+            renderer.render(scene, camera);
+        }
+        animate();
+    }, undefined, function (error) {
+        console.error('An error occurred loading the texture:', error);
+    });
+
+</script>
+</body>
+</html>
