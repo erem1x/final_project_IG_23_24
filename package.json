@@ -9,6 +9,7 @@
     "cannon-es": "^0.20.0",
     "cannon-es-debugger": "^1.0.0",
     "dat.gui": "^0.7.9",
+    "progressbar.js": "^1.1.1",
     "vite": "^5.3.1"
   }
 }

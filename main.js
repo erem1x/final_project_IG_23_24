@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
-import { OrbitControls } from 'three/examples/jsm/Addons.js'
 import CannonDebugger from 'cannon-es-debugger'
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'
+import * as PROGRESS from 'progressbar.js'
 
 // Setting these variables as global
 let scene, camera, renderer;
@@ -16,9 +16,39 @@ let wheelBody1, wheelBody2, wheelBody3, wheelBody4;
 let wheelMesh1, wheelMesh2, wheelMesh3, wheelMesh4;
 let maxSteerVal = Math.PI / 8; // steer of the car
 let maxForce = 100; // max force on the car
+let lastVelocity = 0;
+let tolerance = 0.5;
 
-let chaseCam, chaseCamPilot; // 2 POVs of the camera
+let chaseCam, chaseCamPilot; // chase camera
 let view = new THREE.Vector3(); // world position of the camera
+
+let bar = new PROGRESS.SemiCircle('#speed', {
+    strokeWidth: 16,
+    color: '#FFEA82',
+    trailColor: '#ccc',
+    easing: 'easeInOut',
+    duration: 1000,
+    svgStyle: null,
+    text: {
+        value: "",
+        alignToBottom: false
+    },
+    from: {color: '#038214'},
+    to: {color: '#ff0000'},
+    step: (state, bar) => {
+        bar.path.setAttribute('stroke', state.color);
+        let value = Math.round(bar.value() * 50);
+        if(value === 0){
+            bar.setText('');
+        }else{
+            bar.setText(value);
+        }
+        bar.text.style.color = state.color;
+    }
+});
+bar.text.style.top = "5vw";
+bar.text.style.fontFamily = '"Arial", Helvetica, sans-serif';
+bar.text.style.fontSize = '2.0vw';
 
 const textureLoader = new THREE.TextureLoader(); // texture loader
 
@@ -29,6 +59,7 @@ initChaseCam();
 createGround(); // create the "earth"
 createCar();
 createRamp();
+createRoof();
 animate();
 
 
@@ -61,21 +92,24 @@ function initScene(){
     document.body.appendChild(renderer.domElement);
 
     // Lighting
-    const light = new THREE.DirectionalLight();
-    light.position.set(25, 120, 25);
-    scene.add(light);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // color, intensity
+    scene.add(ambientLight);
 
-    light.castShadow = true;
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // color, intensity
+    directionalLight.position.set(-10, 500, 1000);
+    directionalLight.castShadow = true;
 
-    let d = 600;
-    light.shadow.mapSize.width = 2048;
-    light.shadow.mapSize.height = 2048;
-    light.shadow.camera.near = 0.5;
-    light.shadow.camera.far = d;
-    light.shadow.camera.top = d;
-    light.shadow.camera.bottom = -d;
-    light.shadow.camera.left = -d;
-    light.shadow.camera.right = -d;
+    // Set up shadow properties for the light
+    directionalLight.shadow.mapSize.width = 4096; // default is 512
+    directionalLight.shadow.mapSize.height = 4096; // default is 512
+    directionalLight.shadow.camera.near = 1; // default is 0.5
+    directionalLight.shadow.camera.far = 2000; // default is 500
+    directionalLight.shadow.camera.left = -500;
+    directionalLight.shadow.camera.right = 500;
+    directionalLight.shadow.camera.top = 500;
+    directionalLight.shadow.camera.bottom = -500;
+
+    scene.add(directionalLight);
 }
 
 function initChaseCam(){
@@ -126,7 +160,7 @@ function createGround(){
     groundTexture.wrapT = THREE.RepeatWrapping;
     groundTexture.repeat.set(24, 24);
 
-    const groundMat = new THREE.MeshStandardMaterial({
+    const groundMat = new THREE.MeshLambertMaterial({
         map: groundTexture,
         color: 0x38761d // dark green
     });
@@ -156,7 +190,7 @@ function createCar(){
     // Shape and 
     const carShape = new CANNON.Box(new CANNON.Vec3(4, 0.5, 2));
     carBody = new CANNON.Body({
-        mass: 10,
+        mass: 6,
         material: carMaterial,
         shape: carShape,
         position: new CANNON.Vec3(0,6,0),
@@ -177,10 +211,9 @@ function createCar(){
     const Gloader = new GLTFLoader();
     Gloader.load("./models/scene.gltf", function(gltf){
         carMesh = gltf.scene;
-        carMesh.scale.set(1, 1, 1);
+        carMesh.scale.set(3, 3, 3);
         carMesh.position.copy(carBody.position);
         carMesh.quaternion.copy(carBody.quaternion);
-    
 
         carMesh.add(chaseCam);
         scene.add(carMesh);
@@ -256,9 +289,8 @@ function addWheels(){
     });
 }
 
-
 function createRamp(){
-    const rampShape = new CANNON.Box(new CANNON.Vec3(5,1,10));
+    const rampShape = new CANNON.Box(new CANNON.Vec3(6,1,50));
     const rampBody = new CANNON.Body({
         mass: 0,
         shape: rampShape,
@@ -266,13 +298,13 @@ function createRamp(){
         angularDamping: 0.5  
     });
     rampBody.position = new CANNON.Vec3(0, 1, 15);
-    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI/12);
+    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI/15);
 
     world.addBody(rampBody);
 
     // Ramp Mesh
     const rampMat = new THREE.MeshStandardMaterial({color: 0xd3c3a2});
-    const rampGeo = new THREE.BoxGeometry(10, 2, 20);
+    const rampGeo = new THREE.BoxGeometry(12, 2, 100);
 
     const rampMesh = new THREE.Mesh(rampGeo, rampMat);
     scene.add(rampMesh);
@@ -280,8 +312,44 @@ function createRamp(){
     rampMesh.quaternion.copy(rampBody.quaternion);
 
     rampMesh.receiveShadow = true;
+    rampMesh.castShadow = true;
 }
 
+function createRoof(){
+    const sideShape = new CANNON.Box(new CANNON.Vec3(4, 60, 4));
+    const leftBody = new CANNON.Body({
+        mass: 0,
+        shape: sideShape,
+        material: groundMaterial
+    });
+    const rightBody = new CANNON.Body({
+        mass: 0,
+        shape: sideShape,
+        material: groundMaterial
+    });
+    leftBody.position = new CANNON.Vec3(-20, 0, 120);
+    rightBody.position = new CANNON.Vec3(20, 0, 120);
+
+    world.addBody(leftBody);
+    world.addBody(rightBody);
+
+    //roof mesh
+    const roofMat = new THREE.MeshStandardMaterial({color: 0xd3c3a2});
+    const sideGeo = new THREE.BoxGeometry(8, 120, 8);
+
+    const leftMesh = new THREE.Mesh(sideGeo, roofMat);
+    scene.add(leftMesh);
+
+    const rightMesh = new THREE.Mesh(sideGeo, roofMat);
+    scene.add(rightMesh);
+
+    leftMesh.position.copy(leftBody.position);
+    rightMesh.position.copy(rightBody.position);
+
+    leftMesh.castShadow = true;
+    rightMesh.castShadow = true;
+
+}
 
 // Commands to move car
 // MOVE
@@ -337,7 +405,7 @@ document.addEventListener('keyup', (event) => {
 // Create the meshes for the vehicle
 function createMeshes(){
     const wheelGeo = new THREE.SphereGeometry(1);
-    const wheelMat = new THREE.MeshNormalMaterial();
+    const wheelMat = new THREE.MeshNormalMaterial({transparent: true, opacity: 0});
 
     wheelMesh1 = new THREE.Mesh(wheelGeo, wheelMat);
     scene.add(wheelMesh1);
@@ -382,6 +450,7 @@ function animate(){
 
     updateCar();
     updateChaseCam();
+    updateVelocity();
 
     renderer.render(scene, camera);
     
@@ -395,6 +464,23 @@ function updateChaseCam(){
     camera.position.lerpVectors(camera.position, view, 0.3); // gap between camera and car
 }
 
+
+
+function updateHUD(){
+    bar.animate(lastVelocity / 35); // 35 is real max velocity
+}
+
+function getVelocity(vel){
+    return Math.sqrt(vel.x*vel.x + vel.y*vel.y + vel.z*vel.z);
+}
+
+function updateVelocity(){
+    const speed = getVelocity(carBody.velocity);
+    if (Math.abs(speed-lastVelocity) > tolerance){
+        lastVelocity = speed;
+        updateHUD();
+    }
+}
 
 // Adapt to window resize
 function onWindowResize(){
