@@ -19,9 +19,14 @@ let wheelBody1, wheelBody2, wheelBody3, wheelBody4;
 let wheelMesh1, wheelMesh2, wheelMesh3, wheelMesh4;
 let maxSteerVal = Math.PI / 8; // steer of the car
 let maxForce = 100; // max force on the car
+
 let rampExists = false;
+let doorOpen = false;
+
+let startTime, timerInterval; // timer
 
 let buttonBody1, buttonBody2;
+let buttonMat1, buttonMat2;
 
 let chaseCam, chaseCamPilot; // chase camera
 let view = new THREE.Vector3(); // world position of the camera
@@ -37,7 +42,9 @@ createGround(); // create the "earth"
 createCar();
 createRoof();
 createButtons();
+createDoor();
 createWalls(); // so that the map is limited
+startTimer();
 animate();
 
 
@@ -222,6 +229,12 @@ function addWheels(){
       position: new CANNON.Vec3(-2, 0, axisWidth / 2),
       axis: new CANNON.Vec3(0, 0, 1),
       direction: down,
+      dampingRelaxation: 2.3,
+      dampingCompression: 4.5,
+      suspensionStiffness: 45,
+      useCustomSlidingRotationalSpeed: true,
+      customSlidingRotationalSpeed: -30
+      
     });
 
     // Second wheel
@@ -265,20 +278,30 @@ function addWheels(){
 }
 
 function createRamp(){
+    sideMaterial = new CANNON.Material("sideMaterial"); // slippery (ice)
+    const iceContactMaterial = new CANNON.ContactMaterial(carMaterial, sideMaterial, {
+        friction: 0.9,
+        restitution: 0
+    })
+    world.addContactMaterial(iceContactMaterial);
+
     const rampShape = new CANNON.Box(new CANNON.Vec3(6,1,179));
     const rampBody = new CANNON.Body({
         mass: 0,
         shape: rampShape,
-        material: groundMaterial,
-        angularDamping: 0.5  
+        material: sideMaterial,  
     });
     rampBody.position = new CANNON.Vec3(30, 1, -50);
-    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 10);
+    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 10.8);
 
     world.addBody(rampBody);
 
     // Ramp Mesh
-    const rampMat = new THREE.MeshStandardMaterial({color: 0xd3c3a2});
+    const rampTexture = textureLoader.load("./textures/ice.jpg");
+    rampTexture.wrapS = THREE.RepeatWrapping;
+    rampTexture.wrapT = THREE.RepeatWrapping;
+    rampTexture.repeat.set(2, 2);
+    const rampMat = new THREE.MeshPhysicalMaterial({color: 0xb9e8ea, map: rampTexture, roughness: 0, metalness: 0, transmission: 0.2});
     const rampGeo = new THREE.BoxGeometry(12, 2, 348);
 
     const rampMesh = new THREE.Mesh(rampGeo, rampMat);
@@ -313,9 +336,10 @@ function createRoof(){
     //roof mesh
     const roofMat = new THREE.MeshPhysicalMaterial({
         color: 0xd3c3a2,
-        roughness: 0.7,
+        roughness: 0.2,
         transmission: 1,
-        thickness: 1
+        thickness: 1,
+        ior: 2.33
     });
     const sideGeo = new THREE.BoxGeometry(8, 120, 8);
 
@@ -397,7 +421,7 @@ function createWalls(){
 }
 
 function createButtons(){
-    const buttonShape = new CANNON.Cylinder(1, 1, 0.2);
+    const buttonShape = new CANNON.Cylinder(1, 5, 0.2);
     buttonBody1 = new CANNON.Body({
         mass: 0,
         shape: buttonShape,
@@ -417,13 +441,15 @@ function createButtons(){
     world.addBody(buttonBody1);
     world.addBody(buttonBody2);
 
-    const buttonMat = new THREE.MeshPhongMaterial({color: 0xff0000});
+    buttonMat1 = new THREE.MeshPhongMaterial({color: 0xff0000});
+    buttonMat2 = new THREE.MeshPhongMaterial({color: 0xff0000});
+
     const buttonGeo = new THREE.CylinderGeometry(2, 2, 0.4);
 
-    const buttonMesh1 = new THREE.Mesh(buttonGeo, buttonMat);
+    const buttonMesh1 = new THREE.Mesh(buttonGeo, buttonMat1);
     scene.add(buttonMesh1);
 
-    const buttonMesh2 = new THREE.Mesh(buttonGeo, buttonMat);
+    const buttonMesh2 = new THREE.Mesh(buttonGeo, buttonMat2);
     scene.add(buttonMesh2);
 
     buttonMesh1.position.copy(buttonBody1.position);
@@ -434,14 +460,53 @@ function createButtons(){
 
 }
 
+function createDoor(){
+    const doorShape = new CANNON.Box(new CANNON.Vec3(20, 40, 2));
+    const leftDoorBody = new CANNON.Body({
+        mass: 0,
+        shape: doorShape,
+        material: groundMaterial 
+    });
+    leftDoorBody.position = new CANNON.Vec3(8, 9, 120);
+    leftDoorBody.quaternion.setFromEuler(0, Math.PI / 2, 0);
+
+    world.addBody(leftDoorBody);
+
+    // Door Mesh
+    let leftDoorMesh;
+    const Gloader = new GLTFLoader();
+    Gloader.load("./models/door/scene.gltf", function(gltf){
+        leftDoorMesh = gltf.scene;
+        leftDoorMesh.scale.set(25, 25, 25);
+        leftDoorMesh.position.copy(leftDoorBody.position);
+        leftDoorMesh.quaternion.copy(leftDoorBody.quaternion);
+
+        scene.add(leftDoorMesh);
+
+        leftDoorMesh.traverse(function(node) {
+            if(node.isMesh) {node.castShadow = true;}
+        });
+    });
+}
+
+
+// handlers for the buttons
+buttonBody1.addEventListener('collide', (event) => {
+    if(event.body.material){
+        if(event.body.material.name === "carMaterial" && !doorOpen){
+            buttonMat1.color.setHex(0x00ff00);
+            openDoor();
+        }
+    }
+});
+
 buttonBody2.addEventListener('collide', (event) => {
-    console.log(event.body.id);
-    if(event.body.id === 1 && !rampExists){
-        console.log("COLLISSION");
+    if(event.body.material.name === "carMaterial" && !rampExists){
         rampExists = true;
         createRamp();
+        buttonMat2.color.setHex(0x00ff00);
     }
-})
+});
 
 
 // Commands to move car
@@ -466,8 +531,10 @@ document.addEventListener('keydown', (event) => {
         case 's':
             vehicle.setWheelForce(-maxForce / 2, 0);
             vehicle.setWheelForce(-maxForce / 2, 1);
-            vehicle.setWheelForce(-maxForce / 2, 2);
-            vehicle.setWheelForce(-maxForce / 2, 3);
+            break;
+
+        case ' ':
+            resetCar();
             break;
     }
 });
@@ -517,6 +584,40 @@ function createMeshes(){
     scene.add(wheelMesh4);
 }
 
+function resetCar(){
+    scene.remove(carMesh);
+    vehicle.removeFromWorld(world);
+    createCar();
+}
+
+function animate(){
+    //cannonDebugger.update();
+    
+    world.step(timeStep);
+
+    updateCar();
+    updateChaseCam();
+
+    if(bodiesArray){
+        updateItems();
+    }
+
+    renderer.render(scene, camera);
+    
+    requestAnimationFrame(animate);
+}
+
+function startTimer(){
+    startTime = performance.now();
+    timerInterval = setInterval(updateTimer, 10);
+}
+
+function stopTimer(){
+    clearInterval(timerInterval);
+}
+
+
+// UPDATE FUNCTIONS
 // Update sync between mesh and body
 function updateCar(){
     if(carMesh){
@@ -546,27 +647,6 @@ function updateItems(){
     }
 }
 
-
-function animate(){
-    //cannonDebugger.update();
-    
-    world.step(timeStep);
-
-    updateCar();
-    updateChaseCam();
-
-    if(bodiesArray){
-        updateItems();
-    }
-
-    renderer.render(scene, camera);
-    
-    requestAnimationFrame(animate);
-}
-
-
-// UPDATE FUNCTIONS
-
 function updateChaseCam(){
     chaseCamPilot.getWorldPosition(view);
     if (view.y < 1) view.y = 1; // y always positive to avoid camera flip
@@ -574,6 +654,22 @@ function updateChaseCam(){
     camera.position.lerpVectors(camera.position, view, 0.3); // gap between camera and car
 }
 
+function updateTimer(){
+    const currentTime = performance.now();
+    const elapsedTime = currentTime - startTime;
+
+    const totalSeconds = Math.floor(elapsedTime / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    const milliseconds = Math.floor(elapsedTime % 1000);
+
+    const formattedMinutes = minutes.toString().padStart(2, '0');
+    const formattedSeconds = seconds.toString().padStart(2, '0');
+    const formattedMilliseconds = milliseconds.toString().padStart(3, '0');
+
+    document.getElementById('timer').textContent = `${formattedMinutes}:${formattedSeconds}:${formattedMilliseconds}`;
+
+}
 // Adapt to window resize
 function onWindowResize(){
     camera.aspect = window.innerWidth / window.innerHeight;
