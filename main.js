@@ -2,6 +2,8 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import CannonDebugger from 'cannon-es-debugger'
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'
+import swal from 'sweetalert'
+import { PLYLoader } from 'three/examples/jsm/Addons.js'
 //import { GUI } from 'dat.gui'
 
 
@@ -9,12 +11,17 @@ import { GLTFLoader } from 'three/examples/jsm/Addons.js'
 let scene, camera, renderer;
 let world, cannonDebugger;
 let timeStep = 1/60; // update rate for the world
-let groundMaterial, sideMaterial, carMaterial;
+
+let ambientLight, directionalLight, light;
+
+let groundMaterial, groundMesh, sideMaterial, carMaterial;
+
+let easterEgg = false;
 
 let meshesArray = []; // gathering all additional dynamic items
 let bodiesArray = [];
 
-let capsuleMesh, capsuleGeo, capsuleBody; // goal variables
+let capsuleMesh, capsuleBody, baseMesh, baseBody; // goal variables
 
 let carBody, carMesh; // car without wheels
 let vehicle; // full body of the car
@@ -50,11 +57,12 @@ createCar();
 createRoof(); // columns + glass cubes
 createButtons(); // logical buttons for the game
 createDoor(); 
+createFence();
 createWalls(); // so that the map is limited
 createGoal(); // item to retrieve in order to win
-createBall();
 startTimer(); // keep the time 
 animate();
+
 
 
 
@@ -86,10 +94,10 @@ function initScene(){
     document.body.appendChild(renderer.domElement);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // color, intensity
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // color, intensity
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // color, intensity
+    directionalLight = new THREE.DirectionalLight(0xffffff, 1); // color, intensity
     directionalLight.position.set(-110, 700, 1000);
     directionalLight.castShadow = true;
 
@@ -160,7 +168,7 @@ function createGround(){
     });
     const groundGeo = new THREE.BoxGeometry(1000, 2, 1000);
 
-    const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    groundMesh = new THREE.Mesh(groundGeo, groundMat);
     scene.add(groundMesh);
     groundMesh.position.set(0, -1, 0);
 
@@ -301,8 +309,8 @@ function createRamp(){
         shape: rampShape,
         material: sideMaterial,  
     });
-    rampBody.position = new CANNON.Vec3(30, 1, -50);
-    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 10.8);
+    rampBody.position = new CANNON.Vec3(30, 9, -55);
+    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 13);
 
     world.addBody(rampBody);
 
@@ -311,7 +319,7 @@ function createRamp(){
     rampTexture.wrapS = THREE.RepeatWrapping;
     rampTexture.wrapT = THREE.RepeatWrapping;
     rampTexture.repeat.set(2, 2);
-    const rampMat = new THREE.MeshPhysicalMaterial({color: 0xfff8dc, map: rampTexture, roughness: 0, metalness: 0, transmission: 0.2});
+    const rampMat = new THREE.MeshPhysicalMaterial({color: 0x8b6914, map: rampTexture, roughness: 0.8, metalness: 0});
     const rampGeo = new THREE.BoxGeometry(12, 2, 348);
 
     const rampMesh = new THREE.Mesh(rampGeo, rampMat);
@@ -429,7 +437,7 @@ function createBall(){
             shape: new CANNON.Sphere(2),
             material: ballPhyMat
         });
-        ballBody.position = new CANNON.Vec3(i % 2 == 0 ? (-10 + i*4) : -15 + i*2 , 100, 130+18*i);
+        ballBody.position = new CANNON.Vec3(i % 2 == 0 ? (-10 + i*4) : -15 - i*2 , 100, 130+18*i);
         ballMesh.position.copy(ballBody.position);
 
         scene.add(ballMesh);
@@ -469,7 +477,7 @@ function createWalls(){
     const wallGeo = new THREE.BoxGeometry(1000, 240, 30);
     const wallMat = new THREE.MeshLambertMaterial({
         map: wallTexture,
-        color: 0x8e4d2c,
+        color: 0x9a5938,
     });
     
 
@@ -519,7 +527,7 @@ function createWalls(){
         mass:0,
         shape: wallShape,
         material: groundMaterial,
-        position: new CANNON.Vec3(-260, 60, -80)
+        position: new CANNON.Vec3(-240, 60, -80)
     });
     wallBody3.quaternion.setFromEuler(0, -Math.PI / 2, 0);
     world.addBody(wallBody3);
@@ -612,28 +620,95 @@ function createDoor(){
 
     rightDoorMesh.position.copy(rightDoorBody.position);
     meshesArray.push(rightDoorMesh);
-    bodiesArray.push(rightDoorBody);         
+    bodiesArray.push(rightDoorBody); 
+    
+    leftDoorMesh.castShadow = true;
+    leftDoorMesh.receiveShadow = true;
+    rightDoorMesh.castShadow = true;
+    rightDoorMesh.receiveShadow = true;
 
 }
 
+function createFence(){
+    let leftFenceMesh;
+    let rightFenceMesh;
+
+    const fenceTexture= textureLoader.load("./textures/fence.jpg");
+    fenceTexture.wrapS = THREE.RepeatWrapping;
+    fenceTexture.wrapT = THREE.RepeatWrapping;
+    fenceTexture.repeat.set(0.2, 0.2);
+
+    const fenceGeo = new THREE.BoxGeometry(180, 30, 8, 50, 50);
+    const fenceMat = new THREE.MeshPhysicalMaterial({
+        map: fenceTexture,
+        color: 0xdcf3ff,
+        roughness: 0.2,
+        transmission: 0.2,
+        thickness: 1,
+        metalness: 0.8,
+        wireframe: true
+    });
+    
+    leftFenceMesh = new THREE.Mesh(fenceGeo, fenceMat);
+    leftFenceMesh.position.set(125, 10, 120);
+
+    rightFenceMesh = new THREE.Mesh(fenceGeo, fenceMat);
+    rightFenceMesh.position.set(-132, 10, 120);
+
+    scene.add(leftFenceMesh);
+    scene.add(rightFenceMesh);
+
+    leftFenceMesh.castShadow = true;
+    leftFenceMesh.receiveShadow = true;
+
+    rightFenceMesh.castShadow = true;
+    rightFenceMesh.receiveShadow = true;
+}
+
 function createGoal(){
+    const marble = textureLoader.load("textures/marble.jpg");
+    marble.wrapS = THREE.RepeatWrapping;
+    marble.wrapT = THREE.RepeatWrapping;
+
+    // base for the statue
+    const baseGeo = new THREE.CylinderGeometry(13, 13, 3);
+    const baseMat = new THREE.MeshLambertMaterial();
+    baseMesh = new THREE.Mesh(baseGeo, baseMat);
+    scene.add(baseMesh);
+
+    const baseShape = new CANNON.Cylinder(6.5, 6.5, 1.5);
+    baseBody = new CANNON.Body({
+        shape: baseShape,
+        mass: 0,
+    });
+    baseBody.position = new CANNON.Vec3(-5, 0, 300);
+    baseMesh.position.copy(baseBody.position);
+    world.addBody(baseBody);
+
     const capsuleShape = new CANNON.Cylinder(3, 3, 6);
     capsuleBody = new CANNON.Body({
         shape: capsuleShape,
         mass: 0
     });
-    capsuleBody.position = new CANNON.Vec3(-5, 0, 300);
+    capsuleBody.position = new CANNON.Vec3(-5, 5, 300);
     world.addBody(capsuleBody);
 
-    capsuleGeo = new THREE.CapsuleGeometry(3, 6, 16, 16);
-    const mat = new THREE.MeshLambertMaterial({color: 0xabcdef});
 
-    capsuleMesh = new THREE.Mesh(capsuleGeo, mat);
-    capsuleMesh.receiveShadow = true;
-    capsuleMesh.castShadow = true;
+    new PLYLoader().load('models/Lucy.ply', function(geometry){
 
-    scene.add(capsuleMesh);
-    capsuleMesh.position.set(-5, 10, 300);
+        geometry.scale( 0.02, 0.02, 0.02 );
+        geometry.computeVertexNormals();
+
+        const material = new THREE.MeshLambertMaterial({map: marble});
+
+        capsuleMesh = new THREE.Mesh( geometry, material );
+        capsuleMesh.position.set(-5, 10, 300);
+        capsuleMesh.rotation.y = -Math.PI / 5;
+        capsuleMesh.castShadow = true;
+        capsuleMesh.receiveShadow = true;
+        scene.add( capsuleMesh );
+
+    } );
 }
 
 
@@ -643,26 +718,55 @@ function createGoal(){
 buttonBody1.addEventListener('collide', (event) => {
     if(event.body.material){
         if(event.body.material.name === "carMaterial" && !doorOpen){
+            buttonMat2.color.setHex(0xff0000);
             buttonMat1.color.setHex(0x00ff00);
             openDoor();
+            easterEgg = true;
         }
     }
 });
 
 buttonBody2.addEventListener('collide', (event) => {
-    if(event.body.material.name === "carMaterial" && !rampExists){
-        rampExists = true;
-        createRamp();
-        buttonMat2.color.setHex(0x00ff00);
+    if(event.body.material.name === "carMaterial"){
+        if(easterEgg){
+            createBall();
+            easterEgg = false;
+            buttonMat2.color.setHex(0x0000ff);
+        }
+        if(!rampExists){
+            rampExists = true;
+            createRamp();
+            buttonMat2.color.setHex(0x00ff00);
+            buttonMat1.color.setHex(0xff0000);
+        }
     }
 });
 
-capsuleBody.addEventListener('collide', (event) => {
+// end of the game
+baseBody.addEventListener('collide', (event) => {
     if(event.body.material){
         if(event.body.material.name === 'carMaterial' && doorOpen){
             doorOpen = false;
             stopTimer();
-            alert(document.getElementById('timer').textContent);
+            swal("Congratulations!", `Your time was: ${document.getElementById('timer').textContent}`, "success", {
+                buttons: {
+                    visit: {
+                        text: "Visit threejs.org",
+                        value: 'visit'
+                    },
+                    quit: true,
+                },
+            }).then((value) => {
+                console.log(value);
+                switch ( value) {
+                    case "visit":
+                        window.location.replace('http://threejs.org');
+                        break;
+                    case "quit":
+                        window.location.replace("https://www.uniroma1.it/it/pagina-strutturale/home");
+                        break;
+                }   
+            });
         }
     }
 })
@@ -696,8 +800,13 @@ document.addEventListener('keydown', (event) => {
             resetCar();
             break;
         
+        // debug
         case 'k':
             openDoor();
+            break;
+
+        case 'l':
+            createBall();
             break;
     }
 });
@@ -753,16 +862,63 @@ function resetCar(){
     createCar();
 }
 
+// switch from day to night
 function openDoor(){
     if(!doorOpen){
         doorOpen = true;
 
-        const light = new THREE.DirectionalLight(0xff00bb, 1.5);
-        light.position.set(10, 15, 300);
+        // new ambient light
+        const ambient = new THREE.HemisphereLight( 0xffffff, 0x8d8d8d, 0.15 );
+		scene.add( ambient );
+
+        // spotlight for the goal
+        light = new THREE.SpotLight(0xffffff, 8000);
+        light.position.set(30, 30, 250);
+        light.angle = Math.PI / 6;
+        light.penumbra = 1;
+        light.decay = 2;
+
+        // texture of light
+        const text = textureLoader.load('./textures/cool.jpg', () => {
+            light.map=text;
+        });
+        text.minFilter = THREE.LinearFilter;
+        text.magFilter = THREE.LinearFilter;
+        text.colorSpace = THREE.SRGBColorSpace;
+
         light.castShadow = true;
         light.target = capsuleMesh;
+        light.shadow.mapSize.width = 1024;
+		light.shadow.mapSize.height = 1024;
+		light.shadow.camera.near = 1;
+		light.shadow.camera.far = 100;
+		light.shadow.focus = 1;
         scene.add(light);
 
+
+        //debug
+        //const lightHelper = new THREE.SpotLightHelper(light);
+        //scene.add(lightHelper);
+
+        scene.background = new THREE.CubeTextureLoader()
+        .setPath('./src/night/')
+        .load([
+            'posx.jpg',
+            'negx.jpg',
+            'posy.jpg',
+            'negy.jpg',
+            'posz.jpg',
+            'negz.jpg'
+        ]);
+
+        ambientLight.visible = false;
+        directionalLight.intensity = 0.2;
+        directionalLight.position.set(-35, 100, -200);
+
+        // blackish ground
+        groundMesh.material.color = 0xFF5733;
+
+        // opens the door
         rightDoorBody.quaternion.setFromEuler(0, -Math.PI / 2, 0);
         leftDoorBody.quaternion.setFromEuler(0, Math.PI / 2, 0);
         rightDoorBody.position.set(-36, 25, 136);
@@ -784,7 +940,7 @@ function animate(){
         updateItems();
     }
 
-    if(capsuleMesh){
+    if(capsuleMesh && light && baseMesh){
         updateGoal();
     }
 
@@ -828,11 +984,9 @@ function updateCar(){
 }
 
 function updateGoal(){
-    const time = Date.now();
-    const angle = (2 * Math.PI * time) / 2000;
-    const displacement = 2 * Math.sin(angle);
-
-    capsuleMesh.position.y = displacement + 10;
+    const time = performance.now() / 3000;
+	light.position.x -= Math.cos(time) / 10;
+	light.position.z += Math.sin(time) / 10;
 }
 
 function updateItems(){
