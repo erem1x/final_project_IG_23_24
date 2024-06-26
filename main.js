@@ -2,7 +2,6 @@ import * as THREE from 'three'
 import * as CANNON from 'cannon-es'
 import CannonDebugger from 'cannon-es-debugger'
 import { GLTFLoader } from 'three/examples/jsm/Addons.js'
-import * as PROGRESS from 'progressbar.js'
 
 // Setting these variables as global
 let scene, camera, renderer;
@@ -21,7 +20,9 @@ let maxSteerVal = Math.PI / 8; // steer of the car
 let maxForce = 100; // max force on the car
 
 let rampExists = false;
+
 let doorOpen = false;
+let leftDoorBody, rightDoorBody;
 
 let startTime, timerInterval; // timer
 
@@ -40,6 +41,7 @@ initWorld();
 initChaseCam();
 createGround(); // create the "earth"
 createCar();
+createRamp();
 createRoof();
 createButtons();
 createDoor();
@@ -81,7 +83,7 @@ function initScene(){
     scene.add(ambientLight);
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1); // color, intensity
-    directionalLight.position.set(-10, 500, 1000);
+    directionalLight.position.set(-10, 700, 1000);
     directionalLight.castShadow = true;
 
     // Set up shadow properties for the light
@@ -461,32 +463,77 @@ function createButtons(){
 }
 
 function createDoor(){
-    const doorShape = new CANNON.Box(new CANNON.Vec3(20, 40, 2));
-    const leftDoorBody = new CANNON.Body({
+    // BODIES
+    // Left Door 
+    const doorShape = new CANNON.Box(new CANNON.Vec3(13, 25, 2));
+    leftDoorBody = new CANNON.Body({
         mass: 0,
         shape: doorShape,
         material: groundMaterial 
     });
-    leftDoorBody.position = new CANNON.Vec3(8, 9, 120);
-    leftDoorBody.quaternion.setFromEuler(0, Math.PI / 2, 0);
-
+    leftDoorBody.position = new CANNON.Vec3(10, 25, 120);
     world.addBody(leftDoorBody);
 
-    // Door Mesh
+    // Right Door
+    rightDoorBody = new CANNON.Body({
+        mass: 0,
+        shape: doorShape,
+        material: groundMaterial
+    });
+    rightDoorBody.position = new CANNON.Vec3(-17, 25, 120);
+    world.addBody(rightDoorBody);
+
+    // keep the bodies in an array in order to update the mesh when they open
+    bodiesArray.push(leftDoorBody);
+    bodiesArray.push(rightDoorBody);
+
+
+    // MESHES
+    // Left Door 
     let leftDoorMesh;
     const Gloader = new GLTFLoader();
     Gloader.load("./models/door/scene.gltf", function(gltf){
         leftDoorMesh = gltf.scene;
-        leftDoorMesh.scale.set(25, 25, 25);
-        leftDoorMesh.position.copy(leftDoorBody.position);
-        leftDoorMesh.quaternion.copy(leftDoorBody.quaternion);
+        leftDoorMesh.scale.set(20, 32, 2);
+        leftDoorMesh.position.set(-48, -32, 145);
 
         scene.add(leftDoorMesh);
 
         leftDoorMesh.traverse(function(node) {
-            if(node.isMesh) {node.castShadow = true;}
+            if(node.isMesh) {
+                node.castShadow = true;
+                node.material = new THREE.MeshStandardMaterial({
+                    roughness: 0.2,
+                    color: 0xb9e8ea,
+                    metalness: 0.2
+                });
+            }
         });
     });
+
+    // Right Door
+    let rightDoorMesh;
+    Gloader.load("./models/door/scene.gltf", function(gltf){
+        rightDoorMesh = gltf.scene;
+        rightDoorMesh.scale.set(20, 32, 2);
+        rightDoorMesh.position.set(-78, -32, 145);
+
+        scene.add(rightDoorMesh);
+
+        rightDoorMesh.traverse(function(node) {
+            if(node.isMesh) {
+                node.castShadow = true;
+                node.material = new THREE.MeshStandardMaterial({
+                    roughness: 0.2,
+                    color: 0xb9e8ea,
+                    metalness: 0.2
+                });
+            }
+        });
+    });
+
+    meshesArray.push(leftDoorMesh);
+    meshesArray.push(rightDoorMesh);
 }
 
 
@@ -535,6 +582,10 @@ document.addEventListener('keydown', (event) => {
 
         case ' ':
             resetCar();
+            break;
+        
+        case 'k':
+            openDoor();
             break;
     }
 });
@@ -590,8 +641,27 @@ function resetCar(){
     createCar();
 }
 
+function openDoor(){
+    console.log("Opening..");
+    if(!doorOpen){
+        doorOpen = true;
+        rightDoorBody.quaternion.setFromEuler(0, Math.PI / 2, 0);
+        leftDoorBody.quaternion.setFromEuler(0, Math.PI / 2, 0);
+        rightDoorBody.position.set(5, 25, 120);
+        leftDoorBody.position.set(-12, 25, 120)
+    }
+
+    setTimeout(() =>{
+        rightDoorBody.quaternion.setFromEuler(0, 0, 0);
+        leftDoorBody.quaternion.setFromEuler(0, 0, 0);
+        rightDoorBody.position.set(10, 25, 120);
+        leftDoorBody.position.set(-17, 25, 120);
+    })
+}
+
+
 function animate(){
-    //cannonDebugger.update();
+    cannonDebugger.update();
     
     world.step(timeStep);
 
@@ -642,8 +712,10 @@ function updateCar(){
 
 function updateItems(){
     for (let i = 0; i < meshesArray.length; i++) {
-        meshesArray[i].position.copy(bodiesArray[i].position);
-        meshesArray[i].quaternion.copy(bodiesArray[i].quaternion);
+        if(meshesArray[i]){
+            meshesArray[i].position.copy(bodiesArray[i].position);
+            meshesArray[i].quaternion.copy(bodiesArray[i].quaternion);
+        }
     }
 }
 
